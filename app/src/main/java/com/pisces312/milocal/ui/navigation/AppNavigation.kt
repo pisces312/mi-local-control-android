@@ -9,11 +9,13 @@ import androidx.navigation.navArgument
 import com.pisces312.milocal.ui.adddevice.AddDeviceScreen
 import com.pisces312.milocal.ui.device.DeviceControlScreen
 import com.pisces312.milocal.ui.home.HomeScreen
+import com.pisces312.milocal.ui.settings.SettingsScreen
 
 object Routes {
     const val HOME = "home"
     const val ADD_DEVICE = "add_device"
     const val DEVICE_CONTROL = "device/{deviceId}"
+    const val SETTINGS = "settings"
 
     fun deviceControl(deviceId: Long) = "device/$deviceId"
 }
@@ -26,7 +28,8 @@ fun AppNavigation() {
         composable(Routes.HOME) {
             HomeScreen(
                 onAddDevice = { navController.navigate(Routes.ADD_DEVICE) },
-                onDeviceClick = { id -> navController.navigate(Routes.deviceControl(id)) }
+                onDeviceClick = { id -> navController.navigate(Routes.deviceControl(id)) },
+                onSettings = { navController.navigate(Routes.SETTINGS) }
             )
         }
         composable(Routes.ADD_DEVICE) {
@@ -42,6 +45,11 @@ fun AppNavigation() {
             val deviceId = backStackEntry.arguments?.getLong("deviceId") ?: 0L
             DeviceControlScreen(
                 deviceId = deviceId,
+                onBack = { navController.popBackStack() }
+            )
+        }
+        composable(Routes.SETTINGS) {
+            SettingsScreen(
                 onBack = { navController.popBackStack() }
             )
         }

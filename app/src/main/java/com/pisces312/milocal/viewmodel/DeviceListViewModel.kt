@@ -5,34 +5,47 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pisces312.milocal.data.db.AppDatabase
 import com.pisces312.milocal.data.db.DeviceEntity
+import com.pisces312.milocal.data.db.GroupEntity
 import com.pisces312.milocal.data.repository.DeviceRepository
+import com.pisces312.milocal.data.repository.GroupRepository
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
+enum class DisplayMode { COMPACT, DETAIL, GRID }
+enum class DeviceTab { ALL, GROUP, ROOM }
+
 data class DeviceUiState(
     val devices: List<DeviceEntity> = emptyList(),
+    val groups: List<GroupEntity> = emptyList(),
+    val rooms: List<String> = emptyList(),
+    val currentTab: DeviceTab = DeviceTab.ALL,
+    val displayMode: DisplayMode = DisplayMode.DETAIL,
     val loading: Boolean = false
 )
 
 class DeviceListViewModel(app: Application) : AndroidViewModel(app) {
-    private val repo = DeviceRepository(AppDatabase.getInstance(app).deviceDao())
+    private val deviceRepo = DeviceRepository(AppDatabase.getInstance(app).deviceDao())
+    private val groupRepo = GroupRepository(AppDatabase.getInstance(app).groupDao())
 
     private val _state = MutableStateFlow(DeviceUiState())
     val state: StateFlow<DeviceUiState> = _state.asStateFlow()
 
-    init {
-        viewModelScope.launch {
-            repo.allDevices().collect { devices ->
-                _state.update { it.copy(devices = devices, loading = false) }
-            }
-        }
-    }
-
     private val _importResult = MutableStateFlow<ImportResult?>(null)
     val importResult: StateFlow<ImportResult?> = _importResult.asStateFlow()
 
+    init {
+        viewModelScope.launch {
+            combine(deviceRepo.allDevices(), groupRepo.allGroups(), deviceRepo.getRooms()) { devices, groups, rooms ->
+                _state.update { it.copy(devices = devices, groups = groups, rooms = rooms, loading = false) }
+            }.collect()
+        }
+    }
+
+    fun setTab(tab: DeviceTab) = _state.update { it.copy(currentTab = tab) }
+    fun setDisplayMode(mode: DisplayMode) = _state.update { it.copy(displayMode = mode) }
+
     fun deleteDevice(device: DeviceEntity) {
-        viewModelScope.launch { repo.delete(device) }
+        viewModelScope.launch { deviceRepo.delete(device) }
     }
 
     fun importDevices(text: String) {
@@ -43,7 +56,7 @@ class DeviceListViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             try {
-                val ids = repo.insertAll(devices)
+                val ids = deviceRepo.insertAll(devices)
                 _importResult.value = ImportResult(devices.size, ids.size, null)
             } catch (e: Exception) {
                 _importResult.value = ImportResult(devices.size, 0, e.message)
@@ -55,7 +68,6 @@ class DeviceListViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun parseDeviceText(text: String): List<DeviceEntity> {
         val devices = mutableListOf<DeviceEntity>()
-        // Pattern: "名称 (model)" / "DID: xxx Token: xxx" / "IP: x.x.x.x [状态]"
         val line1 = Regex("^(.+?)\\s*\\(([^)]+)\\)")
         val line2 = Regex("DID:\\s*\\d+\\s+Token:\\s*([0-9a-fA-F]{32})")
         val line3 = Regex("IP:\\s*(\\d+\\.\\d+\\.\\d+\\.\\d+)")

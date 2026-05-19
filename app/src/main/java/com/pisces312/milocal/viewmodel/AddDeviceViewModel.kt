@@ -15,6 +15,9 @@ data class AddDeviceState(
     val token: String = "",
     val model: String = "",
     val type: String = "generic",
+    val groupId: Long? = null,
+    val room: String = "",
+    val existingRooms: List<String> = emptyList(),
     val saving: Boolean = false,
     val saved: Boolean = false,
     val error: String? = null
@@ -26,11 +29,21 @@ class AddDeviceViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(AddDeviceState())
     val state: StateFlow<AddDeviceState> = _state.asStateFlow()
 
+    init {
+        viewModelScope.launch {
+            repo.getRooms().collect { rooms ->
+                _state.update { it.copy(existingRooms = rooms) }
+            }
+        }
+    }
+
     fun updateName(name: String) = _state.update { it.copy(name = name) }
     fun updateIp(ip: String) = _state.update { it.copy(ip = ip) }
     fun updateToken(token: String) = _state.update { it.copy(token = token) }
     fun updateModel(model: String) = _state.update { it.copy(model = model) }
     fun updateType(type: String) = _state.update { it.copy(type = type) }
+    fun updateGroupId(groupId: Long?) = _state.update { it.copy(groupId = groupId) }
+    fun updateRoom(room: String) = _state.update { it.copy(room = room) }
 
     fun save() {
         val s = _state.value
@@ -51,7 +64,9 @@ class AddDeviceViewModel(app: Application) : AndroidViewModel(app) {
                         ip = s.ip,
                         token = s.token,
                         model = s.model,
-                        type = s.type
+                        type = s.type,
+                        groupId = s.groupId,
+                        room = s.room.ifBlank { null }
                     )
                 )
                 _state.update { it.copy(saving = false, saved = true) }

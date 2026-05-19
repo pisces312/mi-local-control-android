@@ -58,7 +58,12 @@ fun DeviceControlScreen(
             Card(modifier = Modifier.fillMaxWidth()) {
                 ListItem(
                     headlineContent = { Text(device.ip) },
-                    supportingContent = { Text(device.model.ifBlank { device.type }) },
+                    supportingContent = {
+                        val parts = mutableListOf<String>()
+                        if (device.model.isNotBlank()) parts.add(device.model) else parts.add(device.type)
+                        device.room?.let { parts.add(it) }
+                        Text(parts.joinToString(" · "))
+                    },
                     leadingContent = {
                         Icon(
                             painterResource(if (state.online == true) R.drawable.ic_wifi else R.drawable.ic_wifi_off),
@@ -80,7 +85,7 @@ fun DeviceControlScreen(
                 )
             }
 
-            GenericControlPanel(vm, device)
+            GenericControlPanel(vm, device, state)
 
             state.error?.let {
                 Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
@@ -94,26 +99,114 @@ fun DeviceControlScreen(
 }
 
 @Composable
-private fun GenericControlPanel(vm: DeviceControlViewModel, device: DeviceEntity) {
+private fun GenericControlPanel(
+    vm: DeviceControlViewModel,
+    device: DeviceEntity,
+    state: com.pisces312.milocal.viewmodel.DeviceControlState
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("快捷控制", style = MaterialTheme.typography.titleMedium)
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { vm.setProperty(2, 1, true) }) { Text("开") }
-                OutlinedButton(onClick = { vm.setProperty(2, 1, false) }) { Text("关") }
+                Button(
+                    onClick = { vm.togglePower(true) },
+                    enabled = state.online == true,
+                    colors = if (state.power) ButtonDefaults.buttonColors() else ButtonDefaults.outlinedButtonColors()
+                ) { Text("开") }
+                Button(
+                    onClick = { vm.togglePower(false) },
+                    enabled = state.online == true,
+                    colors = if (!state.power) ButtonDefaults.buttonColors() else ButtonDefaults.outlinedButtonColors()
+                ) { Text("关") }
             }
 
             if (device.type == "light") {
                 Text("灯光控制", style = MaterialTheme.typography.titleSmall)
-                var brightness by remember { mutableFloatStateOf(50f) }
-                Text("亮度: ${brightness.toInt()}%")
+
+                Text("亮度: ${state.brightness}%")
                 Slider(
-                    value = brightness,
-                    onValueChange = { brightness = it },
-                    onValueChangeFinished = { vm.setProperty(2, 2, brightness.toInt()) },
-                    valueRange = 1f..100f
+                    value = state.brightness.toFloat(),
+                    onValueChange = {},
+                    onValueChangeFinished = { /* 由 TextField / 步进控制 */ },
+                    valueRange = 1f..100f,
+                    modifier = Modifier.padding(horizontal = 4.dp)
                 )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(1, 25, 50, 75, 100).forEach { level ->
+                        OutlinedButton(
+                            onClick = { vm.setBrightness(level) },
+                            enabled = state.online == true,
+                            modifier = Modifier.weight(1f)
+                        ) { Text("$level%") }
+                    }
+                }
+
+                Text("色温: ${state.colorTemp}K")
+                Slider(
+                    value = state.colorTemp.toFloat(),
+                    onValueChange = {},
+                    onValueChangeFinished = {},
+                    valueRange = 2700f..6500f,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(2700, 4000, 5000, 6500).forEach { temp ->
+                        OutlinedButton(
+                            onClick = { vm.setColorTemp(temp) },
+                            enabled = state.online == true,
+                            modifier = Modifier.weight(1f)
+                        ) { Text("${temp}K") }
+                    }
+                }
+            }
+
+            if (device.type == "fan" || device.model.startsWith("zhimi.fan.")) {
+                Text("风扇控制", style = MaterialTheme.typography.titleSmall)
+
+                Text("风速: ${state.fanSpeed}%")
+                Slider(
+                    value = state.fanSpeed.toFloat(),
+                    onValueChange = {},
+                    onValueChangeFinished = {},
+                    valueRange = 1f..100f,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(1, 25, 50, 75, 100).forEach { level ->
+                        OutlinedButton(
+                            onClick = { vm.setFanSpeed(level) },
+                            enabled = state.online == true,
+                            modifier = Modifier.weight(1f)
+                        ) { Text("$level%") }
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { vm.setFanSwing(true) },
+                        enabled = state.online == true,
+                        colors = if (state.fanSwing) ButtonDefaults.buttonColors() else ButtonDefaults.outlinedButtonColors()
+                    ) { Text("摇头开") }
+                    Button(
+                        onClick = { vm.setFanSwing(false) },
+                        enabled = state.online == true,
+                        colors = if (!state.fanSwing) ButtonDefaults.buttonColors() else ButtonDefaults.outlinedButtonColors()
+                    ) { Text("摇头关") }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { vm.setFanMode(0) },
+                        enabled = state.online == true,
+                        colors = if (state.fanMode == 0) ButtonDefaults.buttonColors() else ButtonDefaults.outlinedButtonColors()
+                    ) { Text("直吹") }
+                    Button(
+                        onClick = { vm.setFanMode(1) },
+                        enabled = state.online == true,
+                        colors = if (state.fanMode == 1) ButtonDefaults.buttonColors() else ButtonDefaults.outlinedButtonColors()
+                    ) { Text("自然风") }
+                }
             }
         }
     }

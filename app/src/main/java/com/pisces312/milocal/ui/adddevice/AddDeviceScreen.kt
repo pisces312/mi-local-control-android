@@ -6,9 +6,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.pisces312.milocal.R
+import com.pisces312.milocal.data.db.AppDatabase
 import com.pisces312.milocal.viewmodel.AddDeviceViewModel
+import com.pisces312.milocal.viewmodel.GroupViewModel
 
 private val DEVICE_TYPES = listOf("generic" to "通用", "light" to "灯", "plug" to "插座/空调伴侣", "climate" to "空调")
 
@@ -17,9 +21,11 @@ private val DEVICE_TYPES = listOf("generic" to "通用", "light" to "灯", "plug
 fun AddDeviceScreen(
     onSaved: () -> Unit,
     onBack: () -> Unit,
-    vm: AddDeviceViewModel = viewModel()
+    vm: AddDeviceViewModel = viewModel(),
+    groupVm: GroupViewModel = viewModel()
 ) {
     val state by vm.state.collectAsState()
+    val groupState by groupVm.state.collectAsState()
 
     LaunchedEffect(state.saved) {
         if (state.saved) onSaved()
@@ -76,7 +82,7 @@ fun AddDeviceScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            // 设备类型选择
+            // Device type
             var typeExpanded by remember { mutableStateOf(false) }
             ExposedDropdownMenuBox(expanded = typeExpanded, onExpandedChange = { typeExpanded = it }) {
                 OutlinedTextField(
@@ -93,6 +99,48 @@ fun AddDeviceScreen(
                             text = { Text(label) },
                             onClick = { vm.updateType(key); typeExpanded = false }
                         )
+                    }
+                }
+            }
+
+            // Group
+            var groupExpanded by remember { mutableStateOf(false) }
+            ExposedDropdownMenuBox(expanded = groupExpanded, onExpandedChange = { groupExpanded = it }) {
+                OutlinedTextField(
+                    value = groupState.groups.find { it.id == state.groupId }?.name ?: "无",
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("分组") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = groupExpanded) },
+                    modifier = Modifier.fillMaxWidth().menuAnchor()
+                )
+                ExposedDropdownMenu(expanded = groupExpanded, onDismissRequest = { groupExpanded = false }) {
+                    DropdownMenuItem(text = { Text("无") }, onClick = { vm.updateGroupId(null); groupExpanded = false })
+                    groupState.groups.forEach { group ->
+                        DropdownMenuItem(
+                            text = { Text(group.name) },
+                            onClick = { vm.updateGroupId(group.id); groupExpanded = false }
+                        )
+                    }
+                }
+            }
+
+            // Room
+            var roomExpanded by remember { mutableStateOf(false) }
+            ExposedDropdownMenuBox(expanded = roomExpanded, onExpandedChange = { roomExpanded = it }) {
+                OutlinedTextField(
+                    value = state.room,
+                    onValueChange = { vm.updateRoom(it); roomExpanded = false },
+                    label = { Text("房间（可选）") },
+                    placeholder = { Text("客厅、卧室…") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = roomExpanded) },
+                    modifier = Modifier.fillMaxWidth().menuAnchor()
+                )
+                if (state.existingRooms.isNotEmpty()) {
+                    ExposedDropdownMenu(expanded = roomExpanded, onDismissRequest = { roomExpanded = false }) {
+                        state.existingRooms.forEach { room ->
+                            DropdownMenuItem(text = { Text(room) }, onClick = { vm.updateRoom(room); roomExpanded = false })
+                        }
                     }
                 }
             }

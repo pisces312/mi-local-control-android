@@ -36,10 +36,10 @@ object MiIoPacket {
         header.putInt(deviceId)
         header.putInt(timestamp.toInt())
 
-        // checksum = MD5(header_without_checksum + token_bytes)
+        // checksum = MD5(header_without_checksum + token_bytes + encrypted_data)
         val headerBytes = header.array()
         val tokenBytes = token.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-        val checksumInput = headerBytes + tokenBytes
+        val checksumInput = headerBytes + tokenBytes + encrypted
         val checksum = MessageDigest.getInstance("MD5").digest(checksumInput)
         System.arraycopy(checksum, 0, headerBytes, 16, 16)
 

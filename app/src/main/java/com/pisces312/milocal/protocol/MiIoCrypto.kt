@@ -34,7 +34,8 @@ object MiIoCrypto {
         val iv = deriveIv(token)
         val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
         cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(iv))
-        return cipher.doFinal(plaintext)
+        // python-miio 在加密前会在 JSON payload 末尾追加 \x00
+        return cipher.doFinal(plaintext + byteArrayOf(0x00))
     }
 
     fun decrypt(ciphertext: ByteArray, token: String): ByteArray {
@@ -42,6 +43,12 @@ object MiIoCrypto {
         val iv = deriveIv(token)
         val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
         cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(iv))
-        return cipher.doFinal(ciphertext)
+        val decrypted = cipher.doFinal(ciphertext)
+        // 去除 python-miio 添加的末尾 \x00
+        var end = decrypted.size
+        while (end > 0 && decrypted[end - 1] == 0x00.toByte()) {
+            end--
+        }
+        return decrypted.copyOfRange(0, end)
     }
 }
