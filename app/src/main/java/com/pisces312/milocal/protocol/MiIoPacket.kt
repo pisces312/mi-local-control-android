@@ -38,8 +38,10 @@ object MiIoPacket {
 
         // checksum = MD5(header_without_checksum + token_bytes + encrypted_data)
         val headerBytes = header.array()
+        // token 是 32 位十六进制字符串，解码为 16 字节
         val tokenBytes = token.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-        val checksumInput = headerBytes + tokenBytes + encrypted
+        // checksum 只计算 header 前 16 字节（不含 checksum 字段本身），与 python-miio 一致
+        val checksumInput = headerBytes.copyOfRange(0, 16) + tokenBytes + encrypted
         val checksum = MessageDigest.getInstance("MD5").digest(checksumInput)
         System.arraycopy(checksum, 0, headerBytes, 16, 16)
 
@@ -58,7 +60,24 @@ object MiIoPacket {
         val deviceId = buf.int
         val timestamp = buf.int
 
-        val encryptedPayload = response.copyOfRange(HEADER_SIZE, length)
+        val encryptedPayload = if (length > HEADER_SIZE) {
+            response.copyOfRange(HEADER_SIZE, length)
+        } else {
+            ByteArray(0)
+        }
+
+        // 校验 checksum（仅对有加密 payload 的包校验，握手响应跳过）
+        // 与 python-miio IfThenElse(is_hello, Bytes(16), Checksum(...)) 行为一致
+        if (encryptedPayload.isNotEmpty()) {
+            val tokenBytes = token.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+            val checksumInput = response.copyOfRange(0, 16) + tokenBytes + encryptedPayload
+            val expectedChecksum = MessageDigest.getInstance("MD5").digest(checksumInput)
+            val actualChecksum = response.copyOfRange(16, 32)
+            if (!expectedChecksum.contentEquals(actualChecksum)) {
+                throw IllegalArgumentException("Checksum mismatch: token may be invalid")
+            }
+        }
+
         val payload = if (encryptedPayload.isNotEmpty()) {
             MiIoCrypto.decrypt(encryptedPayload, token)
         } else {

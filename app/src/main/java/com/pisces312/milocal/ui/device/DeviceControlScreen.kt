@@ -1,21 +1,31 @@
 package com.pisces312.milocal.ui.device
 
+import android.Manifest
+import android.os.Build
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.ui.res.painterResource
 import com.pisces312.milocal.R
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.rememberPermissionState
+import com.google.accompanist.permissions.isGranted
 import com.pisces312.milocal.data.db.DeviceEntity
 import com.pisces312.milocal.viewmodel.DeviceControlViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
 @Composable
 fun DeviceControlScreen(
     deviceId: Long,
@@ -25,7 +35,26 @@ fun DeviceControlScreen(
     val state by vm.state.collectAsState()
     val device = state.device
 
-    LaunchedEffect(deviceId) { vm.loadDevice(deviceId) }
+    // 运行时权限申请
+    val locationPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        rememberPermissionState(Manifest.permission.NEARBY_WIFI_DEVICES)
+    } else {
+        rememberPermissionState(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+
+    LaunchedEffect(deviceId) {
+        if (locationPermission.status.isGranted) {
+            vm.loadDevice(deviceId)
+        } else {
+            locationPermission.launchPermissionRequest()
+        }
+    }
+
+    LaunchedEffect(locationPermission.status.isGranted) {
+        if (locationPermission.status.isGranted && device == null) {
+            vm.loadDevice(deviceId)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -39,6 +68,17 @@ fun DeviceControlScreen(
                 actions = {
                     IconButton(onClick = vm::refresh) {
                         Icon(Icons.Default.Refresh, contentDescription = "刷新")
+                    }
+                    var showLogDialog by remember { mutableStateOf(false) }
+                    IconButton(onClick = { showLogDialog = true }) {
+                        Icon(Icons.Default.Info, contentDescription = "日志")
+                    }
+                    if (showLogDialog) {
+                        LogDialog(
+                            logs = state.logs,
+                            onClear = vm::clearLogs,
+                            onDismiss = { showLogDialog = false }
+                        )
                     }
                 }
             )
@@ -99,6 +139,46 @@ fun DeviceControlScreen(
 }
 
 @Composable
+private fun LogDialog(
+    logs: List<String>,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("操作日志") },
+        text = {
+            if (logs.isEmpty()) {
+                Text("暂无日志", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                SelectionContainer {
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 400.dp),
+                        reverseLayout = true
+                    ) {
+                        items(logs.reversed()) { log ->
+                            Text(
+                                text = log,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(vertical = 2.dp),
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        },
+        dismissButton = {
+            TextButton(onClick = onClear) { Text("清空") }
+        }
+    )
+}
+
+@Composable
 private fun GenericControlPanel(
     vm: DeviceControlViewModel,
     device: DeviceEntity,
@@ -111,12 +191,10 @@ private fun GenericControlPanel(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = { vm.togglePower(true) },
-                    enabled = state.online == true,
                     colors = if (state.power) ButtonDefaults.buttonColors() else ButtonDefaults.outlinedButtonColors()
                 ) { Text("开") }
                 Button(
                     onClick = { vm.togglePower(false) },
-                    enabled = state.online == true,
                     colors = if (!state.power) ButtonDefaults.buttonColors() else ButtonDefaults.outlinedButtonColors()
                 ) { Text("关") }
             }
@@ -136,7 +214,6 @@ private fun GenericControlPanel(
                     listOf(1, 25, 50, 75, 100).forEach { level ->
                         OutlinedButton(
                             onClick = { vm.setBrightness(level) },
-                            enabled = state.online == true,
                             modifier = Modifier.weight(1f)
                         ) { Text("$level%") }
                     }
@@ -154,7 +231,6 @@ private fun GenericControlPanel(
                     listOf(2700, 4000, 5000, 6500).forEach { temp ->
                         OutlinedButton(
                             onClick = { vm.setColorTemp(temp) },
-                            enabled = state.online == true,
                             modifier = Modifier.weight(1f)
                         ) { Text("${temp}K") }
                     }
@@ -176,7 +252,6 @@ private fun GenericControlPanel(
                     listOf(1, 25, 50, 75, 100).forEach { level ->
                         OutlinedButton(
                             onClick = { vm.setFanSpeed(level) },
-                            enabled = state.online == true,
                             modifier = Modifier.weight(1f)
                         ) { Text("$level%") }
                     }
@@ -185,12 +260,10 @@ private fun GenericControlPanel(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = { vm.setFanSwing(true) },
-                        enabled = state.online == true,
                         colors = if (state.fanSwing) ButtonDefaults.buttonColors() else ButtonDefaults.outlinedButtonColors()
                     ) { Text("摇头开") }
                     Button(
                         onClick = { vm.setFanSwing(false) },
-                        enabled = state.online == true,
                         colors = if (!state.fanSwing) ButtonDefaults.buttonColors() else ButtonDefaults.outlinedButtonColors()
                     ) { Text("摇头关") }
                 }
@@ -198,12 +271,10 @@ private fun GenericControlPanel(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = { vm.setFanMode(0) },
-                        enabled = state.online == true,
                         colors = if (state.fanMode == 0) ButtonDefaults.buttonColors() else ButtonDefaults.outlinedButtonColors()
                     ) { Text("直吹") }
                     Button(
                         onClick = { vm.setFanMode(1) },
-                        enabled = state.online == true,
                         colors = if (state.fanMode == 1) ButtonDefaults.buttonColors() else ButtonDefaults.outlinedButtonColors()
                     ) { Text("自然风") }
                 }

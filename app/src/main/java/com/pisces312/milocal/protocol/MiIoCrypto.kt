@@ -20,12 +20,15 @@ object MiIoCrypto {
     }
 
     fun deriveKey(token: String): ByteArray {
-        return md5(token.toByteArray())
+        // token 是 32 位十六进制字符串，先解码为 16 字节
+        val tokenBytes = token.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        return md5(tokenBytes)
     }
 
     fun deriveIv(token: String): ByteArray {
         val key = deriveKey(token)
-        val ivInput = key + token.toByteArray()
+        val tokenBytes = token.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val ivInput = key + tokenBytes
         return md5(ivInput)
     }
 
@@ -35,7 +38,9 @@ object MiIoCrypto {
         val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
         cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(iv))
         // python-miio 在加密前会在 JSON payload 末尾追加 \x00
-        return cipher.doFinal(plaintext + byteArrayOf(0x00))
+        val padded = plaintext + byteArrayOf(0x00)
+        android.util.Log.d("MiIoCrypto", "[加密] payload=${plaintext.toString(Charsets.UTF_8)}, key=${key.joinToString("") { "%02x".format(it) }}, iv=${iv.joinToString("") { "%02x".format(it) }}")
+        return cipher.doFinal(padded)
     }
 
     fun decrypt(ciphertext: ByteArray, token: String): ByteArray {
@@ -49,6 +54,15 @@ object MiIoCrypto {
         while (end > 0 && decrypted[end - 1] == 0x00.toByte()) {
             end--
         }
-        return decrypted.copyOfRange(0, end)
+        val result = decrypted.copyOfRange(0, end)
+        return result
+    }
+
+    /** 调试用：验证token解码和密钥推导 */
+    fun verifyToken(token: String): String {
+        val tokenBytes = token.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val key = deriveKey(token)
+        val iv = deriveIv(token)
+        return "tokenBytes=${tokenBytes.size}字节, key=${key.joinToString("") { "%02x".format(it) }}, iv=${iv.joinToString("") { "%02x".format(it) }}"
     }
 }

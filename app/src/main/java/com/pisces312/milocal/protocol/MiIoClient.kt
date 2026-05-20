@@ -12,10 +12,13 @@ import java.util.concurrent.atomic.AtomicInteger
  * MIoT 客户端：通过 UDP 54321 端口与小米设备通信。
  * 支持 MIoT 协议（set_properties/get_properties）和旧版 miIO 协议（set_power 等）。
  *
- * 实现参考 python-miio 的 MiIOProtocol：
- * - 发送命令前自动握手获取 device_id 和 timestamp
- * - 时间戳基于设备时间，每次发送递增 1 秒
- * - 握手失败时标记为未连接，下次重试会重新握手
+ * 设计原则（与 python-miio 的 MiIOProtocol 一致）：
+ * 1. 每次 sendAndReceive 新建 DatagramSocket，命令完成后关闭。
+ *   与 python-miio 行为一致：每次 send() 创建新 socket，获得新的临时端口。
+ * 2. 握手包发送 3 次（与 python-miio discover() 一致），提高局域网 UDP 可靠性。
+ * 3. 失败自动重试 3 次，每次重试递增 id 并重新握手（与 python-miio 一致）。
+ * 4. 握手状态（deviceId、deviceTs）跨调用保持，避免每次命令都重新握手。
+ * 5. 时间戳基于设备时间，每次发送递增 1 秒，与 python-miio 一致。
  */
 class MiIoClient(
     private val ip: String,
@@ -25,6 +28,7 @@ class MiIoClient(
     companion object {
         private const val TAG = "MiIoClient"
         private const val PORT = 54321
+        private const val MAX_RETRY = 3
         private val idCounter = AtomicInteger(1)
 
         /**
@@ -43,40 +47,49 @@ class MiIoClient(
         )
     }
 
-    private val socket = DatagramSocket()
     private var discovered = false
     private var deviceId: Int = MiIoPacket.DEFAULT_DEVICE_ID
     private var deviceTs: Int = 0
 
-    init {
-        socket.soTimeout = timeoutMs
-    }
-
     /**
      * 发送握手包（hello packet），从设备响应中获取真实的 device_id 和 timestamp。
-     * 这是与小米设备通信的前置步骤。
+     * 握手包发送 3 次（与 python-miio discover() 一致），提高 UDP 可靠性。
+     * 每次握手使用独立的 DatagramSocket。
      */
     fun sendHandshake(): MiIoResponse? {
         return try {
+            Log.d(TAG, "[握手] 发送hello包到 $ip:$PORT")
             val address = InetAddress.getByName(ip)
-            val sendPacket = DatagramPacket(HELLO_BYTES, HELLO_BYTES.size, address, PORT)
-            socket.send(sendPacket)
+            val socket = DatagramSocket()
+            try {
+                socket.soTimeout = timeoutMs
 
-            val receiveBuffer = ByteArray(4096)
-            val receivePacket = DatagramPacket(receiveBuffer, receiveBuffer.size)
-            socket.receive(receivePacket)
+                // 发送 3 次握手包，与 python-miio 一致
+                for (i in 1..3) {
+                    val sendPacket = DatagramPacket(HELLO_BYTES, HELLO_BYTES.size, address, PORT)
+                    socket.send(sendPacket)
+                }
 
-            val responseData = receiveBuffer.copyOf(receivePacket.length)
-            val resp = MiIoPacket.parse(responseData, token)
+                val receiveBuffer = ByteArray(4096)
+                val receivePacket = DatagramPacket(receiveBuffer, receiveBuffer.size)
+                Log.d(TAG, "[握手] 等待响应...")
+                socket.receive(receivePacket)
 
-            deviceId = resp.deviceId
-            deviceTs = resp.timestamp
-            discovered = true
+                val responseData = receiveBuffer.copyOf(receivePacket.length)
+                Log.d(TAG, "[握手] 收到 ${responseData.size} 字节")
+                val resp = MiIoPacket.parse(responseData, token)
 
-            Log.d(TAG, "Handshake success: deviceId=0x${Integer.toHexString(deviceId)}, ts=$deviceTs")
-            resp
+                deviceId = resp.deviceId
+                deviceTs = resp.timestamp
+                discovered = true
+
+                Log.d(TAG, "[握手] 成功: deviceId=0x${Integer.toHexString(deviceId)}, ts=$deviceTs")
+                resp
+            } finally {
+                socket.close()
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Handshake failed for $ip: ${e.message}")
+            Log.e(TAG, "[握手] 失败 $ip: ${e.javaClass.simpleName}: ${e.message}")
             discovered = false
             null
         }
@@ -178,16 +191,27 @@ class MiIoClient(
         })
     }
 
-    private fun sendAndReceive(payloadStr: String): MiIoResponse? {
+    /**
+     * 发送命令并等待响应，带自动重试。
+     *
+     * 流程（与 python-miio MiIOProtocol.send() 一致）：
+     * 1. 若未握手（discovered=false），先发送握手包获取 deviceId 和 timestamp。
+     * 2. 新建 DatagramSocket，发送命令包，阻塞等待响应。
+     * 3. 解析响应，更新本地时间戳为设备返回的时间戳。
+     * 4. 失败时自动重试（最多 MAX_RETRY 次），每次重试递增 id 并重新握手。
+     */
+    private fun sendAndReceive(payloadStr: String, retryCount: Int = MAX_RETRY): MiIoResponse? {
         return try {
             // 如果未握手，先发送握手包
             if (!discovered) {
+                Log.d(TAG, "[发送] 未握手，先握手...")
                 sendHandshake() ?: return null
             }
 
             // 时间戳基于设备时间，每次发送递增 1 秒（与 python-miio 一致）
             deviceTs += 1
 
+            Log.d(TAG, "[发送] method=${payloadStr.substringAfter("\"method\":\"").substringBefore("\"")}, id=${payloadStr.substringAfter("\"id\":").substringBefore(",")}")
             val data = MiIoPacket.build(
                 payloadStr.toByteArray(Charsets.UTF_8),
                 token,
@@ -196,30 +220,52 @@ class MiIoClient(
             )
             val address = InetAddress.getByName(ip)
 
-            val sendPacket = DatagramPacket(data, data.size, address, PORT)
-            socket.send(sendPacket)
+            // 每次命令新建 socket，与 python-miio 一致
+            val socket = DatagramSocket()
+            try {
+                socket.soTimeout = timeoutMs
 
-            val receiveBuffer = ByteArray(4096)
-            val receivePacket = DatagramPacket(receiveBuffer, receiveBuffer.size)
-            socket.receive(receivePacket)
+                val sendPacket = DatagramPacket(data, data.size, address, PORT)
+                socket.send(sendPacket)
+                Log.d(TAG, "[发送] 已发送 ${data.size} 字节")
 
-            val responseData = receiveBuffer.copyOf(receivePacket.length)
-            val resp = MiIoPacket.parse(responseData, token)
+                val receiveBuffer = ByteArray(4096)
+                val receivePacket = DatagramPacket(receiveBuffer, receiveBuffer.size)
+                Log.d(TAG, "[发送] 等待响应...")
+                socket.receive(receivePacket)
 
-            // 更新本地时间戳为设备返回的时间戳
-            deviceTs = resp.timestamp
+                val responseData = receiveBuffer.copyOf(receivePacket.length)
+                Log.d(TAG, "[发送] 收到 ${responseData.size} 字节")
+                val resp = MiIoPacket.parse(responseData, token)
 
-            resp
+                // 更新本地时间戳为设备返回的时间戳，保持与设备时间同步
+                deviceTs = resp.timestamp
+
+                resp
+            } finally {
+                socket.close()
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Send/receive failed for $ip: ${e.message}")
-            // 失败后重置 discovered，下次重试会重新握手
-            discovered = false
-            null
+            Log.e(TAG, "[发送] 失败 $ip (retry=${MAX_RETRY - retryCount}): ${e.javaClass.simpleName}: ${e.message}")
+            // 与 python-miio 一致：失败后递增 id 并重新握手，然后重试
+            if (retryCount > 0) {
+                idCounter.addAndGet(100)
+                discovered = false
+                sendAndReceive(payloadStr, retryCount - 1)
+            } else {
+                discovered = false
+                null
+            }
         }
     }
 
+    /** 调试用：验证token和加密 */
+    fun verifyToken(): String {
+        return MiIoCrypto.verifyToken(token)
+    }
+
     fun close() {
-        socket.close()
+        // 不再持有长生命周期 socket，无需关闭
     }
 }
 
