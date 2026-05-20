@@ -9,10 +9,9 @@ BUILD_TYPE="${1:-release}"
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_DIR="$PROJECT_DIR/app"
-BUILD_TOOLS="D:/nili/dev/android_sdk/build-tools/34.0.0"
-KEYSTORE="D:/nili/my-git-projects/my-backup/backup-settings/my-android-release.keystore"
+KEYSTORE="${KEY_STORE_LOCATION:-}"
 KEYSTORE_PASS="${KEY_STORE_PASSWORD:-}"
-KEY_ALIAS="${KEY_ALIAS:-pisces312}"
+KEY_ALIAS="${KEY_ALIAS:-}"
 
 # Auto-detect version from build.gradle.kts
 VERSION=""
@@ -38,6 +37,14 @@ echo "=== Building 米控 $VERSION for $BUILD_TYPE ==="
 
 # Validate signing env vars for release
 if [[ "$BUILD_TYPE" == "release" ]]; then
+    if [[ -z "$KEYSTORE" ]]; then
+        echo "ERROR: KEY_STORE_LOCATION env var not set"
+        exit 1
+    fi
+    if [[ -z "$KEY_ALIAS" ]]; then
+        echo "ERROR: KEY_ALIAS env var not set"
+        exit 1
+    fi
     if [[ -z "$KEYSTORE_PASS" ]]; then
         echo "ERROR: KEY_STORE_PASSWORD env var not set"
         exit 1

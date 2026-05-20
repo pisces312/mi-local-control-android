@@ -30,10 +30,15 @@ android {
                 "proguard-rules.pro"
             )
             signingConfigs.create("release") {
-                storeFile = file(System.getenv("KEY_STORE") ?: "D:\\nili\\my-git-projects\\my-backup\\backup-settings\\my-android-release.keystore")
-                keyAlias = System.getenv("KEY_ALIAS") ?: "pisces312"
-                storePassword = System.getenv("KEY_STORE_PASSWORD") ?: ""
-                keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+                val keystorePath = System.getenv("KEY_STORE_LOCATION")
+                    ?: throw GradleException("KEY_STORE_LOCATION environment variable not set")
+                storeFile = file(keystorePath)
+                keyAlias = System.getenv("KEY_ALIAS")
+                    ?: throw GradleException("KEY_ALIAS environment variable not set")
+                storePassword = System.getenv("KEY_STORE_PASSWORD")
+                    ?: throw GradleException("KEY_STORE_PASSWORD environment variable not set")
+                keyPassword = System.getenv("KEY_PASSWORD")
+                    ?: System.getenv("KEY_STORE_PASSWORD")
             }
             signingConfig = signingConfigs.getByName("release")
         }
@@ -72,6 +77,9 @@ dependencies {
 
     // DataStore
     implementation("androidx.datastore:datastore-preferences:1.1.1")
+
+    // Accompanist Permissions
+    implementation("com.google.accompanist:accompanist-permissions:0.37.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

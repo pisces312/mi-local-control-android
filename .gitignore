@@ -31,3 +31,9 @@ local.properties
 
 # Log files
 *.log
+
+# WorkBuddy memory
+.workbuddy/
+
+# Kotlin
+.kotlin/
